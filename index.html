@@ -402,9 +402,13 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--d
   <div class="uo-tree-area">
     <div class="tree-top">
       <div class="tree-title" id="treeCount">Estrutura</div>
-      <div class="tsw"><span class="tsi">🔍</span><input class="tree-search" type="text" placeholder="Buscar..." oninput="renderTree(this.value)"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="tsw"><span class="tsi">🔍</span><input class="tree-search" type="text" placeholder="Buscar..." oninput="renderTree(this.value)"></div>
+        <button class="btn btn-green btn-sm" onclick="saveUOs()" id="btnSaveUOs" style="white-space:nowrap">💾 Salvar estrutura</button>
+      </div>
     </div>
     <div id="treeBody"></div>
+    <div id="uoSaveMsg" style="display:none;margin-top:16px;padding:12px 16px;background:#eef5f2;border:1px solid #b8d9cc;border-radius:8px;font-size:12px;color:#1e5c42;font-weight:600"></div>
   </div>
 </div>
 
@@ -586,6 +590,13 @@ async function save(){
   setTimeout(()=>setSyncStatus('',''),4000);
 }
 
+// Salva apenas em memória (sem subir ao Supabase)
+// Usado nas ações intermediárias — o upload acontece só no botão Salvar
+function saveLocal(){
+  // Estado já está na variável S em memória — nada a fazer
+  // Mantemos aqui para futura extensão (ex: localStorage como fallback offline)
+}
+
 async function loadFromSupabase(){
   const {data,error}=await sb.from('snapshots').select('*').eq('user_id',currentUser.id).eq('is_latest',true).single();
   if(error||!data)return; // sem dados ainda — começa do zero
@@ -645,8 +656,8 @@ function renderLvls(){
     g.appendChild(el);
   });
 }
-function toggleLvl(id,v){if(v)S.activeLvls.add(id);else S.activeLvls.delete(id);save();renderLvls();renderLvlSel();}
-function allLvl(v){LEVELS.forEach(l=>{if(!S.uos.some(u=>u.nivel===l.id)){if(v)S.activeLvls.add(l.id);else S.activeLvls.delete(l.id);}});save();renderLvls();renderLvlSel();}
+function toggleLvl(id,v){if(v)S.activeLvls.add(id);else S.activeLvls.delete(id);saveLocal();renderLvls();renderLvlSel();}
+function allLvl(v){LEVELS.forEach(l=>{if(!S.uos.some(u=>u.nivel===l.id)){if(v)S.activeLvls.add(l.id);else S.activeLvls.delete(l.id);}});saveLocal();renderLvls();renderLvlSel();}
 
 // ═══ TAB 2: FORM ═══
 function renderLvlSel(){
@@ -706,7 +717,7 @@ function saveUO(){
     S.uos.push({id:gid(),nivel,desc:desc2,gestores:[...editGestores],supId});
     toast('Unidade criada');
   }
-  save();clearForm();renderTree();renderLvls();updateBadges();  // save() é fire-and-forget aqui
+  saveLocal();clearForm();renderTree();renderLvls();updateBadges();
 }
 function clearForm(){
   editId=null;editGestores=[];
@@ -719,6 +730,20 @@ function clearForm(){
   ['eNivel','eDesc','eSup','eGestor'].forEach(id=>ferr(id,null));
   renderLvlSel();
 }
+async function saveUOs(){
+  const btn=document.getElementById('btnSaveUOs');
+  const msg=document.getElementById('uoSaveMsg');
+  btn.disabled=true;btn.textContent='Salvando...';
+  await save();
+  btn.disabled=false;btn.textContent='💾 Salvar estrutura';
+  if(msg){
+    const now=new Date().toLocaleString('pt-BR');
+    msg.style.display='block';
+    msg.textContent=`✓ Estrutura salva em ${now} — ${S.uos.length} unidade${S.uos.length!==1?'s':''}`;
+    setTimeout(()=>{msg.style.display='none';},5000);
+  }
+}
+
 function editUO(id){
   const u=getUO(id);if(!u)return;
   editId=id;editGestores=[...(u.gestores||[])];
@@ -738,7 +763,7 @@ function delUO(id){
   const rm=[id,...descs(id)];
   S.colabs.forEach(c=>{if(rm.includes(c.uoId))c.uoId=null;});
   S.uos=S.uos.filter(u=>!rm.includes(u.id));
-  save();closeM('mDel');renderTree();renderLvls();updateBadges();
+  saveLocal();closeM('mDel');renderTree();renderLvls();updateBadges();
   if(editId&&rm.includes(editId))clearForm();
   if(selUO&&rm.includes(selUO)){selUO=null;closeDrawer();}
   toast('Unidade removida');
@@ -1043,9 +1068,8 @@ function alocarSelecionados(){
   if(!poolSel.length){toast('Nenhuma pessoa disponível selecionada','warn');return;}
   poolSel.forEach(id=>{const c=getC(id);if(c)c.uoId=selUO;});
   selected.clear();
-  save();updateBadges();updateSelBar();
+  saveLocal();updateBadges();updateSelBar();
   renderDwPool();renderDwUO();
-  // Atualizar contador no card do org
   atualizarCardOrg(selUO);
   const uo=getUO(selUO);
   toast(`${poolSel.length} pessoa${poolSel.length>1?'s':''} alocada${poolSel.length>1?'s':''} em "${uo?.desc}"`,'ok');
@@ -1087,7 +1111,7 @@ function onDrop(e,targetUOId){
   });
   if(blocked.length)toast(`${blocked.join(', ')} já em outra unidade.`,'warn',4000);
   dragIds=[];selected.clear();
-  save();
+  saveLocal();
   // Atualizar contador no card do org
   const card=document.getElementById('orgcard-'+selUO);
   if(card){
@@ -1103,7 +1127,7 @@ function onDrop(e,targetUOId){
 function removeFromUO(id){
   const c=getC(id);if(!c)return;
   const uoAntes=c.uoId;
-  c.uoId=null;save();
+  c.uoId=null;saveLocal();
   atualizarCardOrg(uoAntes);
   updateBadges();renderDwPool();renderDwUO();
 }
@@ -1153,12 +1177,14 @@ function dlJSON(){
 function restore(input){
   const f=input.files[0];if(!f)return;
   const r=new FileReader();
-  r.onload=e=>{
+  r.onload=async e=>{
     try{
       const s=JSON.parse(e.target.result);
       S.activeLvls=new Set(s.activeLvls||[]);S.uos=s.uos||[];S.colabs=s.colabs||JSON.parse(JSON.stringify(SEED));
-      save();editId=null;selUO=null;editGestores=[];selected.clear();
-      renderLvls();renderLvlSel();renderTree();updateBadges();toast('Restaurado!');
+      saveLocal();editId=null;selUO=null;editGestores=[];selected.clear();
+      renderLvls();renderLvlSel();renderTree();updateBadges();
+      await save();
+      toast('Restaurado! Backup salvo no servidor.');
     }catch{toast('Erro ao ler arquivo','err');}
   };r.readAsText(f);input.value='';
 }
